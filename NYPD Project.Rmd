@@ -1,0 +1,157 @@
+---
+title: "NYPD Shooting Incident Data Report"
+author: "Connor Ruch"
+date: "2023-06-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Getting the Data
+
+First we will collect data by using the `read_csv` function to access our data directly from the City of New York.  We will also import libraries that may assist in our analysis.
+
+
+```{r getdata}
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nypd_data <- read_csv(url_in)
+
+```
+
+## Cleaning the Data
+
+Next it is important to clean our data to remove any data we may not need for our analysis.
+
+```{r selectdata}
+nypd_data_clean = nypd_data %>% select(INCIDENT_KEY, BORO, PERP_AGE_GROUP, PERP_SEX, PERP_RACE, VIC_AGE_GROUP, VIC_SEX, VIC_RACE)
+```
+
+By running the summary function, we can quickly examine what our updated data looks like.
+
+```{r summary}
+summary(nypd_data_clean)
+```
+
+Next, we can evaluate where we may see missing data.
+
+```{r countNA}
+lapply(nypd_data_clean, function(x) sum(is.na(x)))
+```
+
+We can remove and replace our missing data to ensure our data is cleaner looking for presentation.
+
+```{r cleanNA}
+nypd_data_clean = nypd_data_clean %>% replace_na(list(PERP_AGE_GROUP = "Not Yet Known", PERP_SEX = "Not Yet Known", PERP_RACE = "Not Yet Known"))
+```
+
+Next, it is important to clean up the dataset by changing appropriate variables to factor and date types.
+
+```{r cleanTYPES}
+nypd_data_clean$INCIDENT_KEY = as.character(nypd_data_clean$INCIDENT_KEY)
+nypd_data_clean$BORO = as.factor(nypd_data_clean$BORO)
+nypd_data_clean$PERP_AGE_GROUP = as.factor(nypd_data_clean$PERP_AGE_GROUP)
+nypd_data_clean$VIC_AGE_GROUP = as.factor(nypd_data_clean$VIC_AGE_GROUP)
+nypd_data_clean$PERP_SEX = as.factor(nypd_data_clean$PERP_SEX)
+nypd_data_clean$VIC_SEX = as.factor(nypd_data_clean$VIC_SEX)
+nypd_data_clean$VIC_RACE = as.factor(nypd_data_clean$VIC_RACE)
+nypd_data_clean$PERP_RACE = as.factor(nypd_data_clean$PERP_RACE)
+
+```
+
+## Analyzing the Data
+
+Next, we will begin by counting incident rates by a selected column.
+
+```{r PerpRace, echo=FALSE}
+plot <- ggplot(nypd_data_clean, aes(x= PERP_RACE)) + geom_bar() + labs(title = "Race of Perpetrator" , x = "Race of Perp" , y = "Count of Incidents") +
+ theme(text = element_text(size=12),
+        axis.text.x = element_text(angle=90, hjust=1))
+plot
+```
+
+Here we can see that there is a difference between 'Unknown' and the field we added - 'Not Yet Known'.  We can draw the conclusion that either different cases were input differently into the database, or some victims were able to identify the perpetrator, but was uncertain about their race classification.  In the case of the former, some officers may have selected 'Unknown' as an ambiguous option, while others may have left the field blank.
+
+Next, let's take a look at incident rates by sex.
+
+```{r PerpSex, echo=FALSE}
+plot2 <- ggplot(nypd_data_clean, aes(x= PERP_SEX)) + geom_bar() + labs(title = "Sex of Perpetrator" , x = "Sex of Perp" , y = "Count of Incidents")+
+ theme(text = element_text(size=12),
+        axis.text.x = element_text(angle=90, hjust=1))
+plot2
+```
+
+The ratio of identified Male perpetrators to female perpetrators is 0.973 as calculated by - `sum(nypd_data_clean$PERP_SEX == "M", na.rm=TRUE) / (sum(nypd_data_clean$PERP_SEX == "F", na.rm=TRUE)+sum(nypd_data_clean$PERP_SEX == "M", na.rm=TRUE))`
+
+It becomes obvious that identified perpetrators are overwhelmingly Male.
+Note: We again see a difference between "U", and "Not Yet Known"
+
+Finally, let's investigate how the race of victims may be affected by each borough.
+
+```{r VICBoro, echo=FALSE}
+plot3 <- ggplot(nypd_data_clean, aes(x = BORO, fill = VIC_RACE)) + geom_bar() + labs(title = "Race of Victim by Borough" , x = "Borough" , y = "Count of Incidents by Race of Victim")+
+ theme(text = element_text(size=12),
+        axis.text.x = element_text(angle=90, hjust=1))
+plot3
+```
+
+
+Now it becomes clear how the race of the victim plays a larger role than would initially seem if we only investigated the race of the perpetrator.  It is also important to note how the Bronx saw a larger percentage of victims being White Hispanic and Black Hispanic.  We could assume this would be due to a larger population in the Bronx than other boroughs.
+
+Let's take one final look at the relationship of the victim and the perpetrator in relation to race.
+
+```{r VICvsPerp}
+
+
+VICPERP = nypd_data_clean[,c(5,8)]
+
+freq <- data.frame(xtabs(~VICPERP$PERP_RACE+ VICPERP$VIC_RACE))
+
+ggplot(freq, aes(x = VICPERP.PERP_RACE, y = VICPERP.VIC_RACE, fill = Freq)) +
+  geom_tile() +
+  labs(title = "Correlation Heatmap",
+       x = "Variable 1",
+       y = "Variable 2")+
+   theme(text = element_text(size=12),
+        axis.text.x = element_text(angle=90, hjust=1))
+```
+
+
+As we can conclude from this heat map, an overwhelming amount of shooting victim/perpetrator combinations were black in New York City. It is important to approach this topic with sensitivity and acknowledge that crime is a complex issue influenced by various socioeconomic factors.
+
+In the context of New York City, like in many urban areas, crime rates can vary across neighborhoods, and certain communities may experience higher crime rates. While crime rates have generally decreased in New York City over the past few decades, including among African American communities, disparities in crime rates and victimization persist.
+
+It is essential to approach discussions about crime with nuance and avoid perpetuating stereotypes or stigmatizing any particular racial or ethnic group. Understanding and addressing the root causes of crime in a holistic manner can contribute to creating safer and more equitable communities for everyone.
+
+
+## Discussion of Bias when analyzing data involving human beings.
+
+When analyzing NYPD crime data, it becomes key to acknowledge an understanding and thorough awareness of the cultural diversity that defines the city of New York. This essential knowledge serves as a critical foundation, particularly when engaging in thoughtful discourse pertaining to the complex dynamics surrounding race. By acknowledging and appreciating the multifaceted factors of the city's culture, a more holistic perspective can be achieved, thereby creating more meaningful discussions and promoting greater understanding and empathy for the audience of the report.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
