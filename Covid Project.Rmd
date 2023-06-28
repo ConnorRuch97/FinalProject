@@ -1,0 +1,214 @@
+---
+title: "Covid 19 Rate of Death and Infection Data Report"
+author: "Connor Ruch"
+date: "2023-06-26"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Intro
+
+The COVID-19 pandemic, affecting millions of people and prompting numerous countries to implement control measures, has caused significant disruption worldwide. Various sources, including the Johns Hopkins University Center for Systems Science and Engineering, have compiled and published data to better comprehend the trajectory of this pandemic. In this R Markdown analysis, our focus will be on exploring the Johns Hopkins COVID-19 data using different packages in the R programming language. We will install the necessary packages, read and clean the data files, and perform data wrangling to prepare it for analysis.  We will be looking into which countries may have experienced the highest rates.
+
+## Getting the Data and Loading Libraries
+
+First we will collect data by using the `read_csv` function to access our data directly from Johns Hopkins University.  We will also import libraries that may assist in our analysis.
+
+
+```{r getdata}
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+##library(ggplot2)
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/4360e50239b4eb6b22f3a1759323748f36752177/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <- c("time_series_covid19_confirmed_global.csv",
+                "time_series_covid19_deaths_global.csv",
+                "time_series_covid19_confirmed_US.csv",
+                "time_series_covid19_deaths_US.csv")
+urls <- str_c(url_in, file_names)
+
+data_cases <- read_csv(urls[1])
+data_deaths <- read_csv(urls[2])
+
+
+```
+
+## Cleaning the Data
+
+Next it is important to clean our data to remove any data we may not need for our analysis.
+
+```{r head}
+head(data_cases)
+head(data_deaths)
+```
+
+By running the head function, we can quickly examine what our updated data looks like.  We can see that several column name corresponds to a day from January 22 2022 all the way out towards the present day.  We can pivot the formatting of this table to make the data easier to work with.
+
+```{r pivot}
+data_cases <- data_cases %>%
+  pivot_longer(cols = -c('Province/State',
+                         'Country/Region', Lat, Long),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat, Long))
+data_deaths <- data_deaths %>%
+  pivot_longer(cols = -c('Province/State',
+                         'Country/Region', Lat, Long),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat, Long))
+```
+
+This created a much simpler table with only four columns as shown below.
+
+```{r head2}
+head(data_cases)
+head(data_deaths)
+```
+
+Next, we can combine our two pivoted tables together.
+
+```{r clean&combine}
+data_combined <- full_join(data_cases, data_deaths,
+                    by = c("Province/State", "Country/Region", "date")) %>%
+  rename(Province_State = "Province/State",
+         Country_Region = "Country/Region",
+         cases = cases.x,
+         deaths = cases.y) %>%
+  mutate(date = mdy(date))
+```
+
+Next, we should begin to think about how we begin to understand different ways to approach an analysis using this data.  Since we have country codes and case counts, it becomes clear that countries with larger populations should have larger case counts in general.  To take this into account, we could include the populations of each country to get a general rate of transmission.
+
+```{r getpopulations}
+population_url <- "https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv?raw=true"
+population <- read_csv(population_url)
+```
+
+Next, let's take a look at how this new data set is setup.
+
+```{r headpopulation}
+head(population)
+```
+
+We can see that Country_Region and Population will be useful to us.  Lets combine these with our original table and drop unneeded columns.
+
+```{r combinetables}
+data_combined <- data_combined %>%
+  left_join(population, by = c("Country_Region", "Province_State")) %>%
+  select(-c(`iso2`, `iso3`, `code3`, `FIPS`, `Admin2`, `Combined_Key`,`UID`, `Lat`, `Long_`))
+```
+
+Next, we can add a few more columns to aid in our analysis.  We will ultimately calculate 'CPT' and 'DPT' as an abbreviation of cases per million and deaths per million.  This will give us a cumulative amount of relative cases over time.  This will be calculated by dividing combined cases/deaths by the population.  Then by multiplying by a million, we will get what we need.
+
+```{r calculate CPT and DPT}
+CPT <- (data_combined$cases/data_combined$Population)*1000
+DPT <- (data_combined$deaths/data_combined$Population)*1000
+data_combined$CPT <- CPT
+data_combined$DPT <- DPT
+```
+
+Let's take one last look at some of our data before we continue to the analysis portion.
+
+```{r headfinal}
+tail(data_combined,20)
+```
+
+
+## Analysis
+
+Let's begin by looking at the most recent CPT for the top 25 countries.
+
+```{r analysis1}
+
+# Filter to the latest day in the data for each country.  Then, group the data,
+# and filter the show the top 25 countries
+
+data_combined_top25 <- data_combined %>% 
+  filter(date >= as.Date("2023-03-9") & date <= as.Date("2023-03-9"))
+
+data_subset <- data_combined_top25 %>% 
+  group_by(Country_Region) %>% 
+  summarize(total_CPT = sum(CPT)) %>% 
+  arrange(desc(total_CPT)) %>% 
+  slice(1:25)
+
+head(data_subset)
+
+```
+
+Now we can visualize the top 25 countries by Cumulative Cases per Million as of 3/9/2023.
+
+
+```{r plot1}
+plot1 <- ggplot(data=data_subset, aes(x = Country_Region,y = total_CPT)) + geom_bar(stat="identity") + labs(title = "CPT" , x = "Country" , y = "Recent CPT")+
+ theme(text = element_text(size=12),
+        axis.text.x = element_text(angle=90, hjust=1))
+plot1
+```
+
+
+Here we can see that the United Kingdom has the most total cases per population.  This figure is above 1000 cases per 1000 people implying that multiple people had several cases, or that there were cases recorded by people not included within the population statistic.
+
+Next, lets take a look at change in cases over time for the UK.
+
+```{r plot2}
+
+#Filter the data to the UK
+data_combined_time <- data_combined %>% 
+  filter(date >= as.Date("2020-01-22") & date <= as.Date("2023-03-09"))
+UKDK <- data_combined_time %>% 
+  group_by(Country_Region) %>%
+  summarize(total_cases = sum(cases)) %>% 
+  filter(Country_Region == "United Kingdom" | Country_Region == "Denmark")
+
+# Filter the global data frame to include only data for the top 5 countries by cases
+UKDK2 <- data_combined %>% 
+  filter(Country_Region %in% UKDK$Country_Region)
+
+UKDK3 <- data_combined %>% 
+  filter(Country_Region %in% UKDK2$Country_Region)
+
+# Create a line chart of the total number of cases by date and country
+ggplot(UKDK3, aes(x = date, y = CPT, color = Country_Region)) +
+  geom_line()
+```
+
+
+We can now notice that the rate of infection for Denmark surpassed the rate for the UK around the start of 2022.  It is possible that policy changes for either country could contribute to this sudden change.
+
+
+Finally, let's take a look at the countries with the highest rates of death.
+
+```{r plot3}
+top_death <- data_combined %>%
+  group_by(Country_Region) %>%
+  summarize(total_cases = sum(cases), 
+            total_deaths = sum(deaths),
+            mortality_rate = total_deaths / total_cases) %>%
+  arrange(desc(mortality_rate)) %>%
+  top_n(20)
+
+ggplot(top_death, aes(x = reorder(Country_Region, -mortality_rate), y = mortality_rate)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top 10 Countries with Highest Rates of Death from Covid 19",
+       x = "Country",
+       y = "Rate of Death") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+
+
+We can clearly conclude that North Korea was hit the hardest by Covid 19.  However, we must take whether or not the data collected is accurate.  A good researcher should investigate how the figures were reported, whether they are estimates, and if the source is reliable.  Knowing what we know about North Korea, skepticism is welcomed.
+
+
+
+
+
+
+
